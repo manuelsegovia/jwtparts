@@ -7,11 +7,7 @@ const createServer = async (config) => {
 		host,
 		port,
 		routes: {
-			cors: {
-				origin: ['http://localhost:5500'],
-				headers: ['Authorization'],
-			},
-
+			cors: true,
 			validate: {
 				failAction: async (request, h, error) =>
 					error.isJoi
