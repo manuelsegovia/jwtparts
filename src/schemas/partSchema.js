@@ -13,16 +13,16 @@ const partSchema = Joi.object({
 		then: Joi.required(),
 		otherwise: Joi.forbidden(),
 	}),
-	rawMaterial: Joi.object()
-		.keys({
-			sku: Joi.string().min(6).max(16).required(),
-			qty: Joi.number().required(),
-		})
-		.when('origen', {
-			is: 'manufactured',
-			then: Joi.required(),
-			otherwise: Joi.forbidden(),
-		}),
+	// rawMaterial: Joi.object()
+	// 	.keys({
+	// 		sku: Joi.string().min(6).max(16).required(),
+	// 		qty: Joi.number().required(),
+	// 	})
+	// 	.when('origen', {
+	// 		is: 'manufactured',
+	// 		then: Joi.required(),
+	// 		otherwise: Joi.forbidden(),
+	// 	}),
 	umPur: Joi.when('origen', {
 		is: 'purchased',
 		then: Joi.string().required(),
@@ -33,9 +33,9 @@ const partSchema = Joi.object({
 		then: Joi.required(),
 		otherwise: Joi.forbidden(),
 	}),
-	blankWeightLbs: Joi.number().when('origen', {
+	blankWeightLbs: Joi.when('origen', {
 		is: 'manufactured',
-		then: Joi.required(),
+		then: Joi.number(),
 		otherwise: Joi.forbidden(),
 	}),
 	lengthIn: Joi.number().required(),
@@ -73,7 +73,7 @@ const partSchema = Joi.object({
 	thicknessIn: Joi.when('origen', {
 		is: 'purchased',
 		then: Joi.required(),
-		otherwise: Joi.forbidden(),
+		//otherwise: Joi.forbidden(),
 	}).when('category', {
 		is: 'pipe',
 		then: Joi.string(),

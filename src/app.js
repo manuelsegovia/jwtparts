@@ -19,7 +19,7 @@ const createServer = async (config) => {
 
 	server.app.config = config;
 	await server.register(require('./plugins'));
-	server.auth.default('miBuen');
+	// server.auth.default('miBuen');
 	server.route(require('./routes'));
 	return server;
 };
