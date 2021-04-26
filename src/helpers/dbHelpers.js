@@ -1,70 +1,82 @@
-const { steelPlateWeight } = require('./weightCalc');
-const transPart = (resp) => {
-	const data = resp.map((part) => {
-		if (part.origen === 'manufactured') {
-			const { qty } = part.rawMaterial;
-			const raw = resp.find((ele) => ele.sku === part.rawMaterial.sku);
-			part.rawMaterial = { ...raw };
-			part.rawMaterial.qty = qty;
+const { steelPlateWeight, qtyArea, qtyLength } = require('./partSpecifics');
+
+const addDetail = (purParts) => {
+	return purParts.map((purPart) => {
+		if (purPart.category.toLowerCase() === 'plate') {
+			return {
+				...purPart,
+				weight: steelPlateWeight(
+					purPart.thicknessIn,
+					purPart.widthIn,
+					purPart.lengthIn
+				),
+			};
 		}
-		return part;
+		return { ...purPart };
 	});
-	return data;
 };
-const findPart = async (criteria, request) => {
-	console.log(criteria);
-	const part = await request.mongo.db
-		.collection('partsMaster')
-		.findOne(criteria);
-	console.log(part);
-	return part;
-};
-
-const manufPlate = async (request) => {
-	const part = request.payload;
+const insertCriteria = (part) => {
+	const { category, thicknessIn, dia, specFile, widthIn, lengthIn } = part;
+	const criteria = {};
 	if (part.category === 'plate') {
-		const criteria = { thicknessIn: part.thicknessIn };
-		console.log('CRITERIA', criteria);
-		const raw = await request.mongo.db
-			.collection('partsMaster')
-			.findOne(criteria);
-
-		const blankWeightLbs = steelPlateWeight(
-			part.thicknessIn,
-			part.widthIn,
-			part.lengthIn
-		);
-		const { widthIn, lengthIn, sku } = raw;
-		const rawArea = widthIn * lengthIn;
-		const partArea = part.widthIn * part.lengthIn;
-		const qty = 1 / Math.floor(rawArea / partArea);
-		part.blankWeightLbs = blankWeightLbs;
-		const rawMaterial = { sku: sku, qty: qty };
-		part.rawMaterial = rawMaterial;
-
-		return part;
+		criteria.category = category;
+		criteria.thicknessIn = thicknessIn;
+		criteria.specFile = specFile;
 	}
-	if (part.category === 'pipe') {
-		const criteria = {
-			diameterIn: part.diameterIn,
-			thicknessIn: part.thicknessIn,
-			seamless: part.seamless,
-		};
-		const raw = await request.mongo.db
-			.collection('partsMaster')
-			.findOne(criteria);
-		const { lengthIn, weightLbs, sku } = raw;
-		const blankWeightLbs = (weightLbs * part.lengthIn) / lengthIn;
-		const qty = 1 / Math.floor(lengthIn / part.lengthIn);
-		const rawMaterial = { sku: sku, qty: qty };
-		part.blankWeightLbs = blankWeightLbs;
-		part.rawMaterial = rawMaterial;
-		return part;
+	if (category === 'pipe') {
+		criteria.category = category;
+		criteria.dia = dia;
+		criteria.thicknessIn = thicknessIn;
+		criteria.specFile = specFile;
 	}
+	return criteria;
+};
+
+const makeDetails = async (makeParts, request) => {
+	const result = await Promise.all(
+		makeParts.map(async (make) => {
+			const { category, thicknessIn, dia, specFile, widthIn, lengthIn } = make;
+
+			const criteria = insertCriteria(make);
+			if (Object.keys(criteria).length === 0) {
+				return { ...make };
+			}
+			const raw = await request.mongo.db
+				.collection('partsMaster')
+				.find(criteria)
+				.toArray();
+			if (raw.length === 0) {
+				return { ...make, rawMat: { 'raw material': 'not existent' } };
+			}
+			const rawMat = [];
+			raw.forEach((part) => {
+				if (part.category === 'plate') {
+					const qty = qtyArea(part.widthIn, part.lengthIn, widthIn, lengthIn);
+					const blankWeightLbs = qty * part.weight;
+					rawMat.push({
+						sku: part.sku,
+						qty,
+						blankWeightLbs,
+					});
+				}
+				if (part.category === 'pipe') {
+					const qty = qtyLength(lengthIn, part.lengthIn);
+					rawMat.push({
+						sku: part.sku,
+						qty,
+					});
+				}
+			});
+			//console.log({ ...make, rawMat });
+			return { ...make, rawMat };
+		})
+	);
+	//console.log('INSIDE', result);
+	return result;
 };
 
 module.exports = {
-	transPart,
-	findPart,
-	manufPlate,
+	addDetail,
+	insertCriteria,
+	makeDetails,
 };
