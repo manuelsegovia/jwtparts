@@ -2,6 +2,8 @@ const {
 	addPartController,
 	getPartsController,
 	massUploadController,
+	includeRawToMfgController,
+	listMissingRawController,
 } = require('../controllers/partsControllers');
 
 const { partSchema } = require('../schemas/partSchema');
@@ -26,6 +28,7 @@ const massUpload = {
 	path: '/upload',
 	options: {
 		payload: {
+			//allow: ['multipart/form-data'],
 			output: 'data',
 			parse: true,
 			multipart: true,
@@ -35,5 +38,17 @@ const massUpload = {
 	},
 	handler: massUploadController,
 };
-
-module.exports = [getParts, newPart, massUpload];
+const missingRaw = {
+	method: 'GET',
+	path: '/includeraw',
+	handler: includeRawToMfgController,
+};
+const listMissingRaw = {
+	method: 'GET',
+	path: '/listmissing',
+	handler: listMissingRawController,
+	options: {
+		description: 'get Mfg parts without raw Mat',
+	},
+};
+module.exports = [getParts, newPart, massUpload, missingRaw, listMissingRaw];

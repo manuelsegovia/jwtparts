@@ -2,14 +2,11 @@ const { steelPlateWeight, qtyArea, qtyLength } = require('./partSpecifics');
 
 const addDetail = (purParts) => {
 	return purParts.map((purPart) => {
+		const { thicknessIn, widthIn, lengthIn } = purPart;
 		if (purPart.category.toLowerCase() === 'plate') {
 			return {
 				...purPart,
-				weight: steelPlateWeight(
-					purPart.thicknessIn,
-					purPart.widthIn,
-					purPart.lengthIn
-				),
+				weight: steelPlateWeight(thicknessIn, widthIn, lengthIn),
 			};
 		}
 		return { ...purPart };
@@ -17,17 +14,12 @@ const addDetail = (purParts) => {
 };
 const insertCriteria = (part) => {
 	const { category, thicknessIn, dia, specFile, widthIn, lengthIn } = part;
-	const criteria = {};
-	if (part.category === 'plate') {
-		criteria.category = category;
-		criteria.thicknessIn = thicknessIn;
-		criteria.specFile = specFile;
+
+	if (category === 'plate') {
+		criteria = { origen: 'purchased', category, thicknessIn, specFile };
 	}
 	if (category === 'pipe') {
-		criteria.category = category;
-		criteria.dia = dia;
-		criteria.thicknessIn = thicknessIn;
-		criteria.specFile = specFile;
+		criteria = { origen: 'purchased', category, dia, thicknessIn, specFile };
 	}
 	return criteria;
 };
@@ -46,7 +38,7 @@ const makeDetails = async (makeParts, request) => {
 				.find(criteria)
 				.toArray();
 			if (raw.length === 0) {
-				return { ...make, rawMat: { 'raw material': 'not existent' } };
+				return { ...make, rawMat: { rawMaterial: 'notExistent' } };
 			}
 			const rawMat = [];
 			raw.forEach((part) => {
@@ -67,11 +59,10 @@ const makeDetails = async (makeParts, request) => {
 					});
 				}
 			});
-			//console.log({ ...make, rawMat });
 			return { ...make, rawMat };
 		})
 	);
-	//console.log('INSIDE', result);
+
 	return result;
 };
 

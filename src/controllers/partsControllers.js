@@ -1,8 +1,8 @@
 const Boom = require('@hapi/boom');
 const csv = require('csvtojson');
-const fs = require('fs').promises;
+const fs = require('fs/promises');
 
-const { transPart, manufPlate, makeDetails } = require('../helpers/dbHelpers');
+const { makeDetails } = require('../helpers/dbHelpers');
 const { steelPlateWeight } = require('../helpers/partSpecifics');
 
 const { addDetail } = require('../helpers/dbHelpers');
@@ -14,37 +14,44 @@ const getPartsController = async (request, h) => {
 			.collection('partsMaster')
 			.find(criteria)
 			.toArray();
-		const data = transPart(resp);
-		return h.response(data).code(200);
+		return h.response(resp).code(200);
 	} catch (error) {
 		console.log(error);
 	}
 };
 const addPartController = async (request, h) => {
-	const { origen } = request.payload;
-	const data =
-		origen === 'purchased' ? request.payload : await manufPlate(request);
-	if (data.origen === 'purchased' && data.category === 'plate') {
-		data.weigthLbs = steelPlateWeight(
-			data.thicknessIn,
-			data.widthIn,
-			data.lengthIn
+	const { origen, category, thicknessIn, widthIn, lengthIn } = request.payload;
+
+	if (origen === 'purchased' && category === 'plate') {
+		request.payload.weigthLbs = steelPlateWeight(
+			thicknessIn,
+			widthIn,
+			lengthIn
 		);
 	}
 	try {
 		const part = await request.mongo.db
 			.collection('partsMaster')
-			.insertOne(data);
+			.insertOne(request.payload);
 		return h.response(part.insertedId).code(201);
 	} catch (error) {
 		throw Boom.badRequest('duplicate part');
 	}
 };
-// mass Upload
+//+++++++++++ mass Upload+++++++++++++++++++++++
 const massUploadController = async (request, h) => {
-	uploadFile = request.payload.csvFile;
-	if (uploadFile === 'undefined') {
-		return h.response({ message: ' no file was selected' });
+	try {
+		const x = await fs.access('./temp/notsaved.txt');
+		await fs.unlink('./temp/notsaved.txt');
+	} catch (error) {
+		console.log(error);
+	}
+
+	const uploadFile = request.payload.csvFile;
+	if (!uploadFile) {
+		throw Boom.unsupportedMediaType(
+			'file must be csv type and smaller than 10MB'
+		);
 	}
 	const filejson = await csv({
 		checkType: true,
@@ -56,57 +63,136 @@ const massUploadController = async (request, h) => {
 	const detailPurParts = addDetail(purParts);
 
 	// add to mongo purchased parts
-	const savedPurParts = async () => {
+	const savedPurParts = async (partsToSave) => {
 		try {
 			const res = await request.mongo.db
 				.collection('partsMaster')
-				.insertMany(detailPurParts, { ordered: false });
-			return { 'pur-skus': res.ops.length, 'pur-errors': 0 };
+				.insertMany(partsToSave, { ordered: false });
+			const msg = {
+				savedSkus: res.ops.length,
+				notSavedSkus: 0,
+				listNotSaved: [],
+			};
+			return msg;
 		} catch (error) {
 			const x = error.writeErrors.map((element) => element.err.op.sku);
-			await fs.writeFile('./temp/duplicates-pur.txt', x.toString());
 			const msg = {
-				'saved-pur-skus': error.result.result.nInserted,
-				'pur-errors': error.writeErrors.length,
+				savedSkus: error.result.result.nInserted,
+				notSavedSkus: error.writeErrors.length,
+				listNotSaved: x,
 			};
 			return msg;
 		}
 	};
 
 	//Make Parts
+
 	const makeParts = filejson.filter(
 		(part) => part.origen.toLowerCase() === 'manufactured'
 	);
-	const dressParts = await makeDetails(makeParts, request);
 
-	const savedMfgParts = async () => {
-		try {
-			const res = await request.mongo.db
-				.collection('partsMaster')
-				.insertMany(dressParts, { ordered: false });
+	const detailMfgParts = await makeDetails(makeParts, request);
 
-			return { 'mfg-skus': res.ops.length, 'mfg-errors': 0 };
-		} catch (error) {
-			const x = error.writeErrors.map((element) => element.err.op.sku);
-
-			await fs.writeFile('./temp/duplicates-mfg.txt', x.toString());
-			const msg = {
-				'saved-mfg-skus': error.result.result.nInserted,
-				'mfg-errors': error.writeErrors.length,
-			};
-			//insertar errores a temp file
-			return msg;
+	const saveAll = async () => {
+		const finalResult = {};
+		if (detailPurParts.length > 0 && makeParts.length > 0) {
+			const msgPur = await savedPurParts(detailPurParts);
+			if (msgPur) {
+				const msgMfg = await savedPurParts(detailMfgParts);
+				for (const key in msgPur) {
+					if (key === 'listNotSaved') {
+						finalResult['listNotSaved'] = [
+							...msgPur.listNotSaved,
+							...msgMfg.listNotSaved,
+						];
+					}
+					finalResult[key] = msgPur[key] + msgMfg[key];
+				}
+				return finalResult;
+			}
+		}
+		if (detailPurParts.length > 0) {
+			return savedPurParts(detailPurParts);
+		}
+		if (makeParts.length > 0) {
+			return savedPurParts(detailMfgParts);
 		}
 	};
-	return h
-		.response({
-			purparts: await savedPurParts(),
-			makewithdetail: await savedMfgParts(),
-		})
-		.code(201);
+
+	const resMsg = await saveAll();
+	const { savedSkus, notSavedSkus, listNotSaved } = resMsg;
+	console.log('listNotSaved', listNotSaved);
+	if (listNotSaved.length > 0) {
+		await fs.writeFile('./temp/notsaved.txt', listNotSaved.toString());
+	}
+
+	return h.response({ savedSkus, notSavedSkus }).code(201);
+};
+//++++++++End Mass Upload
+//++++++Mfg Skus missing raw material++++++
+const includeRawToMfgController = async (request, h) => {
+	criteria = {
+		origen: 'manufactured',
+		$or: [{ rawMat: null }, { rawMat: { rawMaterial: 'notExistent' } }],
+	};
+	//	console.log('criteria', criteria);
+	try {
+		const notExistent = await request.mongo.db
+			.collection('partsMaster')
+			.find(criteria)
+			.toArray();
+
+		if (notExistent.length === 0) {
+			return h.response({
+				message: '0 mfg parts missing raw material',
+			});
+		}
+		const addRaw = await makeDetails(notExistent, request);
+		console.log('ADDRAW', addRaw);
+
+		const saveMfgPart = await Promise.all(
+			addRaw.map(async (part) => {
+				if (part.rawMat.rawMaterial === 'notExistent') {
+					return { sku: part.sku, rawMat: part.rawMat.rawMaterial }; //  resolve mensaje
+				}
+				const x = await request.mongo.db
+					.collection('partsMaster')
+					.updateOne(
+						{ _id: part._id, origen: 'manufactured' },
+						{ $set: { rawMat: part.rawMat } }
+					);
+				if (x.result.nModified === 1) {
+					return { sku: part.sku, rawMat: part.rawMat };
+				}
+				/// find the way to combine
+			})
+		);
+		return h.response({ parts: saveMfgPart });
+	} catch (error) {
+		throw Boom.notFound();
+	}
+};
+const listMissingRawController = async (request, h) => {
+	criteria = {
+		origen: 'manufactured',
+		$or: [{ rawMat: null }, { rawMat: { rawMaterial: 'notExistent' } }],
+	};
+	// const criteria = { rawMat: { rawMaterial: 'notExistent' } };
+	//console.log(criteria);
+	try {
+		const notExistent = await request.mongo.db
+			.collection('partsMaster')
+			.find(criteria)
+			.toArray();
+		return h.response(notExistent);
+	} catch (error) {
+		throw Boom.notFound('0 mfg parts missing raw material');
+	}
 };
 module.exports = {
 	getPartsController,
 	addPartController,
 	massUploadController,
+	includeRawToMfgController,
+	listMissingRawController,
 };
